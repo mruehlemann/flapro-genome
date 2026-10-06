@@ -1,0 +1,21 @@
+name: flapro-genome
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  - python=3.12
+  - mmseqs2
+  - prodigal=2.6.3
+  - hmmer
+  - pandas
+  - numpy
+  - biopython
+  - pyyaml
+  - tqdm
+  - pytest
+  - pip
+  - pip:
+      - -e .
+
