@@ -104,14 +104,24 @@ def build_parser() -> argparse.ArgumentParser:
     _add_logging_options(validate, suppress_defaults=True)
     validate.add_argument("--db", required=True, type=Path, help="Built database directory")
 
-    annotate = subparsers.add_parser("annotate", help="Annotate one protein or nucleotide FASTA")
+    annotate = subparsers.add_parser(
+        "annotate", help="Annotate one protein FASTA, nucleotide FASTA, or GenBank file"
+    )
     _add_logging_options(annotate, suppress_defaults=True)
-    annotate.add_argument("input", type=Path, help="Protein or nucleotide FASTA, optionally gzip-compressed")
+    annotate.add_argument(
+        "input", type=Path,
+        help="Protein FASTA, nucleotide FASTA, or GenBank file, optionally gzip-compressed",
+    )
     _add_annotation_runtime_options(annotate)
 
-    batch = subparsers.add_parser("batch", help="Annotate supported FASTA files in a directory")
+    batch = subparsers.add_parser(
+        "batch", help="Annotate supported FASTA and GenBank files in a directory"
+    )
     _add_logging_options(batch, suppress_defaults=True)
-    batch.add_argument("--input", required=True, type=Path, help="Directory containing FASTA files")
+    batch.add_argument(
+        "--input", required=True, type=Path,
+        help="Directory containing supported FASTA or GenBank files",
+    )
     _add_annotation_runtime_options(batch)
 
     benchmark = subparsers.add_parser(

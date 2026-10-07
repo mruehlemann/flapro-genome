@@ -58,7 +58,7 @@ flapro_db/
 
 `VERSION` records the FlaPro commit, UTC build time, flapro-genome version, and MMseqs2 version.
 
-## Annotate one FASTA
+## Annotate one genome
 
 Protein FASTA:
 
@@ -80,7 +80,19 @@ flapro-genome annotate \
     --threads 16
 ```
 
-Nucleotide input is detected from the sequence alphabet, not the filename. It is translated with Prodigal in metagenome mode by default. Use `--prodigal-mode single` for an appropriate complete isolate genome. Gzip-compressed FASTA input is supported.
+GenBank input (`.gb`, `.gbf`, `.gbk`, `.gbff`, or `.genbank`):
+
+```bash
+flapro-genome annotate \
+    genome.gbk \
+    --db flapro_db \
+    --out results/genome1 \
+    --threads 16
+```
+
+For GenBank files, annotated CDS translations are used directly. Protein identifiers are selected in this order: `protein_id`, `locus_tag`, `gene`, then a generated record/CDS identifier. CDS translations missing from the file are derived using `codon_start` and `transl_table` (bacterial genetic code 11 by default). Pseudogene features are skipped. If the file contains no usable CDS proteins, its nucleotide records are passed to Prodigal.
+
+Nucleotide FASTA input is detected from the sequence alphabet, not the filename. It is translated with Prodigal in metagenome mode by default. Use `--prodigal-mode single` for an appropriate complete isolate genome. Gzip-compressed FASTA and GenBank input is supported.
 
 The output prefix above produces:
 
@@ -91,7 +103,7 @@ results/genome1.flagellins.faa
 results/genome1.summary.tsv
 ```
 
-For nucleotide input, Prodigal proteins, genes, and GFF are also retained with `.prodigal.*` suffixes. Original protein FASTA identifiers are preserved.
+When Prodigal is used, its proteins, genes, and GFF are also retained with `.prodigal.*` suffixes. Original protein FASTA identifiers and GenBank CDS identifiers are preserved.
 
 ## Batch mode
 
@@ -103,7 +115,7 @@ flapro-genome batch \
     --threads 32
 ```
 
-Files ending in `.faa`, `.fasta`, `.fa`, `.fna`, or their `.gz` forms are processed sequentially. Each genome gets its own result directory. Combined tables are written to `results/all_flagellins.tsv` and `results/all_genome_summaries.tsv`.
+Files ending in `.faa`, `.fasta`, `.fa`, `.fna`, `.gb`, `.gbf`, `.gbk`, `.gbff`, `.genbank`, or their `.gz` forms are processed sequentially. Each genome gets its own result directory. Combined tables are written to `results/all_flagellins.tsv` and `results/all_genome_summaries.tsv`.
 
 ## Classification semantics
 
@@ -153,9 +165,8 @@ The benchmark excludes each self-hit and evaluates identity thresholds 50–99% 
 pytest
 ```
 
-Tests cover malformed FlaPro TSV parsing, join accounting, all classification levels, cross-cluster ambiguity, mixed-phenotype clusters, protein/nucleotide FASTA handling, and MMseqs2 self-classification.
+Tests cover malformed FlaPro TSV parsing, join accounting, all classification levels, cross-cluster ambiguity, mixed-phenotype clusters, protein/nucleotide FASTA and GenBank handling, and MMseqs2 self-classification.
 
 ## Scope and future extension
 
 Version 1 is similarity-based. It does not use ShortBRED markers and does not reproduce FlaPro's Random Forest, AlphaFold, or Foldseek analyses. A future version can add an RF-based phenotype predictor for genuinely novel flagellins without changing the current separation between candidate detection, cluster assignment, and phenotype inference.
-

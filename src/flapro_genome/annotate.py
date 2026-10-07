@@ -9,7 +9,14 @@ import pandas as pd
 
 from .build_db import validate_database
 from .classify import Thresholds, classify_hits
-from .fasta import FastaRecord, infer_fasta_type, read_fasta, write_fasta
+from .fasta import (
+    FastaRecord,
+    infer_fasta_type,
+    infer_sequence_file_format,
+    read_fasta,
+    write_fasta,
+)
+from .genbank import extract_genbank
 from .utils import FlaProGenomeError, require_executable, run_command, safe_stem
 
 
@@ -175,7 +182,7 @@ def annotate_fasta(
     database = Path(database_dir).resolve()
     prefix = Path(output_prefix).resolve()
     if not source.is_file():
-        raise FlaProGenomeError(f"Input FASTA not found: {source}")
+        raise FlaProGenomeError(f"Input sequence file not found: {source}")
     if threads < 1:
         raise FlaProGenomeError("--threads must be at least 1")
     errors = validate_database(database)
@@ -183,22 +190,44 @@ def annotate_fasta(
         raise FlaProGenomeError("Database validation failed:\n- " + "\n- ".join(errors))
     prefix.parent.mkdir(parents=True, exist_ok=True)
     genome = safe_stem(source)
-    input_type = infer_fasta_type(source)
-    LOG.info("Input %s inferred as %s FASTA", source, input_type)
+    input_format = infer_sequence_file_format(source)
 
     with tempfile.TemporaryDirectory(prefix=f".{prefix.name}.work-", dir=prefix.parent) as temp_name:
         work = Path(temp_name)
-        normalized_input = work / ("input.fna" if input_type == "nucleotide" else "input.faa")
-        source_records = _normalize_fasta(source, normalized_input)
-        if input_type == "nucleotide":
+        normalized_nucleotide = work / "input.fna"
+        normalized_protein = work / "input.faa"
+        use_prodigal = False
+        if input_format == "genbank":
+            extraction = extract_genbank(source, normalized_protein, normalized_nucleotide)
+            if extraction.proteins:
+                proteins = extraction.proteins
+                protein_fasta = normalized_protein
+                LOG.info("Using annotated CDS proteins from GenBank input %s", source)
+            else:
+                use_prodigal = True
+                LOG.warning(
+                    "No usable annotated CDS proteins found in %s; falling back to Prodigal",
+                    source,
+                )
+        else:
+            input_type = infer_fasta_type(source)
+            LOG.info("Input %s inferred as %s FASTA", source, input_type)
+            normalized_input = normalized_nucleotide if input_type == "nucleotide" else normalized_protein
+            source_records = _normalize_fasta(source, normalized_input)
+            if input_type == "nucleotide":
+                use_prodigal = True
+            else:
+                proteins = source_records
+                protein_fasta = normalized_protein
+
+        if use_prodigal:
             protein_fasta = Path(str(prefix) + ".prodigal.faa")
             genes_fasta = Path(str(prefix) + ".prodigal.genes.fna")
             genes_gff = Path(str(prefix) + ".prodigal.gff")
-            predict_proteins(normalized_input, protein_fasta, genes_fasta, genes_gff, prodigal_mode)
+            predict_proteins(
+                normalized_nucleotide, protein_fasta, genes_fasta, genes_gff, prodigal_mode
+            )
             proteins = list(read_fasta(protein_fasta))
-        else:
-            protein_fasta = normalized_input
-            proteins = source_records
 
         if proteins:
             hits = run_mmseqs_search(
@@ -259,10 +288,14 @@ def batch_annotate(
     output = Path(output_dir).resolve()
     if not source_dir.is_dir():
         raise FlaProGenomeError(f"Batch input directory not found: {source_dir}")
-    allowed = (".faa", ".fasta", ".fa", ".fna", ".faa.gz", ".fasta.gz", ".fa.gz", ".fna.gz")
+    allowed = (
+        ".faa", ".fasta", ".fa", ".fna", ".faa.gz", ".fasta.gz", ".fa.gz", ".fna.gz",
+        ".gb", ".gbf", ".gbk", ".gbff", ".genbank", ".gb.gz", ".gbf.gz", ".gbk.gz",
+        ".gbff.gz", ".genbank.gz",
+    )
     inputs = sorted(path for path in source_dir.iterdir() if path.is_file() and path.name.lower().endswith(allowed))
     if not inputs:
-        raise FlaProGenomeError(f"No supported FASTA files found in {source_dir}")
+        raise FlaProGenomeError(f"No supported FASTA or GenBank files found in {source_dir}")
     names = [safe_stem(path) for path in inputs]
     duplicate_names = sorted({name for name in names if names.count(name) > 1})
     if duplicate_names:

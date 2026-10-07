@@ -11,6 +11,7 @@ from .utils import FlaProGenomeError
 
 AA_ALPHABET = set("ABCDEFGHIKLMNPQRSTVWXYZJUO*-?")
 NUCLEOTIDE_ALPHABET = set("ACGTUNRYSWKMBDHV-?")
+GENBANK_SUFFIXES = (".gb", ".gbf", ".gbk", ".gbff", ".genbank")
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,33 @@ def write_fasta(records: Iterable[FastaRecord], path: str | Path, width: int = 8
 
 def validate_protein_sequence(sequence: str) -> bool:
     return bool(sequence) and set(sequence.upper()) <= AA_ALPHABET
+
+
+def infer_sequence_file_format(path: str | Path) -> str:
+    """Return ``fasta`` or ``genbank`` from a known suffix or file signature."""
+    source = Path(path)
+    name = source.name.lower()
+    if name.endswith(".gz"):
+        name = name[:-3]
+    if name.endswith(GENBANK_SUFFIXES):
+        return "genbank"
+    try:
+        handle = _open_text(source)
+    except OSError as exc:
+        raise FlaProGenomeError(f"Cannot open sequence file {source}: {exc}") from exc
+    with handle:
+        for raw in handle:
+            line = raw.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                return "fasta"
+            if line.startswith("LOCUS"):
+                return "genbank"
+            break
+    raise FlaProGenomeError(
+        f"Could not identify {source} as FASTA or GenBank format"
+    )
 
 
 def infer_fasta_type(path: str | Path, max_residues: int = 100_000) -> str:
