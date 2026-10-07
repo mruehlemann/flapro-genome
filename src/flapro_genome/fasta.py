@@ -12,6 +12,7 @@ from .utils import FlaProGenomeError
 AA_ALPHABET = set("ABCDEFGHIKLMNPQRSTVWXYZJUO*-?")
 NUCLEOTIDE_ALPHABET = set("ACGTUNRYSWKMBDHV-?")
 GENBANK_SUFFIXES = (".gb", ".gbf", ".gbk", ".gbff", ".genbank")
+GFF_SUFFIXES = (".gff", ".gff3")
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,8 @@ def infer_sequence_file_format(path: str | Path) -> str:
         name = name[:-3]
     if name.endswith(GENBANK_SUFFIXES):
         return "genbank"
+    if name.endswith(GFF_SUFFIXES):
+        return "gff"
     try:
         handle = _open_text(source)
     except OSError as exc:
@@ -101,9 +104,14 @@ def infer_sequence_file_format(path: str | Path) -> str:
                 return "fasta"
             if line.startswith("LOCUS"):
                 return "genbank"
+            if line.startswith("##gff-version"):
+                return "gff"
+            fields = line.split("\t")
+            if len(fields) == 9 and fields[3].isdigit() and fields[4].isdigit():
+                return "gff"
             break
     raise FlaProGenomeError(
-        f"Could not identify {source} as FASTA or GenBank format"
+        f"Could not identify {source} as FASTA, GenBank, or GFF format"
     )
 
 

@@ -17,6 +17,7 @@ from .fasta import (
     write_fasta,
 )
 from .genbank import extract_genbank
+from .gff import extract_gff
 from .utils import FlaProGenomeError, require_executable, run_command, safe_stem
 
 
@@ -176,6 +177,7 @@ def annotate_fasta(
     threads: int = 1,
     prodigal_mode: str = "meta",
     include_weak: bool = False,
+    gff_sequence: str | Path | None = None,
 ) -> dict[str, Path]:
     thresholds = thresholds or Thresholds()
     source = Path(input_fasta).resolve()
@@ -191,6 +193,8 @@ def annotate_fasta(
     prefix.parent.mkdir(parents=True, exist_ok=True)
     genome = safe_stem(source)
     input_format = infer_sequence_file_format(source)
+    if gff_sequence is not None and input_format != "gff":
+        raise FlaProGenomeError("--sequence is only valid when the input is GFF")
 
     with tempfile.TemporaryDirectory(prefix=f".{prefix.name}.work-", dir=prefix.parent) as temp_name:
         work = Path(temp_name)
@@ -208,6 +212,24 @@ def annotate_fasta(
                 LOG.warning(
                     "No usable annotated CDS proteins found in %s; falling back to Prodigal",
                     source,
+                )
+        elif input_format == "gff":
+            extraction = extract_gff(
+                source, normalized_protein, normalized_nucleotide, gff_sequence
+            )
+            if extraction.proteins:
+                proteins = extraction.proteins
+                protein_fasta = normalized_protein
+                LOG.info("Using CDS proteins extracted from GFF input %s", source)
+            elif extraction.contigs:
+                use_prodigal = True
+                LOG.warning(
+                    "No usable CDS proteins found in %s; falling back to Prodigal",
+                    source,
+                )
+            else:
+                raise FlaProGenomeError(
+                    f"GFF file {source} contains neither usable CDS translations nor nucleotide sequences"
                 )
         else:
             input_type = infer_fasta_type(source)
@@ -291,12 +313,45 @@ def batch_annotate(
     allowed = (
         ".faa", ".fasta", ".fa", ".fna", ".faa.gz", ".fasta.gz", ".fa.gz", ".fna.gz",
         ".gb", ".gbf", ".gbk", ".gbff", ".genbank", ".gb.gz", ".gbf.gz", ".gbk.gz",
-        ".gbff.gz", ".genbank.gz",
+        ".gbff.gz", ".genbank.gz", ".gff", ".gff3", ".gff.gz", ".gff3.gz",
     )
     inputs = sorted(path for path in source_dir.iterdir() if path.is_file() and path.name.lower().endswith(allowed))
     if not inputs:
-        raise FlaProGenomeError(f"No supported FASTA or GenBank files found in {source_dir}")
-    names = [safe_stem(path) for path in inputs]
+        raise FlaProGenomeError(f"No supported FASTA, GenBank, or GFF files found in {source_dir}")
+
+    def is_gff(path: Path) -> bool:
+        name = path.name.lower()
+        return name.endswith((".gff", ".gff3", ".gff.gz", ".gff3.gz"))
+
+    def is_nucleotide_fasta_name(path: Path) -> bool:
+        name = path.name.lower()
+        return name.endswith((".fna", ".fa", ".fasta", ".fna.gz", ".fa.gz", ".fasta.gz"))
+
+    jobs: list[tuple[Path, Path | None]] = []
+    paired_fastas: set[Path] = set()
+    for path in inputs:
+        if not is_gff(path):
+            continue
+        matches = [
+            candidate for candidate in inputs
+            if is_nucleotide_fasta_name(candidate)
+            and safe_stem(candidate) == safe_stem(path)
+            and infer_fasta_type(candidate) == "nucleotide"
+        ]
+        if len(matches) > 1:
+            raise FlaProGenomeError(
+                f"Multiple possible sequence FASTAs match GFF file {path.name}: "
+                + ", ".join(candidate.name for candidate in matches)
+            )
+        sequence = matches[0] if matches else None
+        if sequence is not None:
+            paired_fastas.add(sequence)
+        jobs.append((path, sequence))
+    jobs.extend(
+        (path, None) for path in inputs if not is_gff(path) and path not in paired_fastas
+    )
+
+    names = [safe_stem(path) for path, _sequence in jobs]
     duplicate_names = sorted({name for name in names if names.count(name) > 1})
     if duplicate_names:
         raise FlaProGenomeError(
@@ -305,12 +360,13 @@ def batch_annotate(
     output.mkdir(parents=True, exist_ok=True)
     annotation_frames: list[pd.DataFrame] = []
     summary_frames: list[pd.DataFrame] = []
-    for path in inputs:
+    for path, sequence_path in jobs:
         name = safe_stem(path)
         sample_dir = output / name
         sample_dir.mkdir(parents=True, exist_ok=True)
         paths = annotate_fasta(
-            path, database_dir, sample_dir / name, thresholds, threads, prodigal_mode, include_weak
+            path, database_dir, sample_dir / name, thresholds, threads, prodigal_mode,
+            include_weak, sequence_path,
         )
         annotation_frames.append(pd.read_csv(paths["annotations"], sep="\t"))
         summary_frames.append(pd.read_csv(paths["summary"], sep="\t"))

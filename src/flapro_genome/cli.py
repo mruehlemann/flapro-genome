@@ -105,17 +105,21 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--db", required=True, type=Path, help="Built database directory")
 
     annotate = subparsers.add_parser(
-        "annotate", help="Annotate one protein FASTA, nucleotide FASTA, or GenBank file"
+        "annotate", help="Annotate one protein FASTA, nucleotide FASTA, GenBank, or GFF file"
     )
     _add_logging_options(annotate, suppress_defaults=True)
     annotate.add_argument(
         "input", type=Path,
-        help="Protein FASTA, nucleotide FASTA, or GenBank file, optionally gzip-compressed",
+        help="Protein FASTA, nucleotide FASTA, GenBank, or GFF file, optionally gzip-compressed",
     )
     _add_annotation_runtime_options(annotate)
+    annotate.add_argument(
+        "--sequence", type=Path,
+        help="Nucleotide FASTA paired with coordinate-only GFF input",
+    )
 
     batch = subparsers.add_parser(
-        "batch", help="Annotate supported FASTA and GenBank files in a directory"
+        "batch", help="Annotate supported FASTA, GenBank, and GFF files in a directory"
     )
     _add_logging_options(batch, suppress_defaults=True)
     batch.add_argument(
@@ -152,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "annotate":
             annotate_fasta(
                 args.input, args.db, args.out, _thresholds(args), args.threads,
-                args.prodigal_mode, args.include_weak,
+                args.prodigal_mode, args.include_weak, args.sequence,
             )
         elif args.command == "batch":
             batch_annotate(
